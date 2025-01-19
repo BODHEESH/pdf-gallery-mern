@@ -62,7 +62,7 @@ const Home = () => {
             whileTap={{ scale: 0.95 }}
           >
             <Link
-              to="/register"
+              to="/dashboard"
               className="inline-flex items-center px-8 py-4 text-lg font-semibold text-white bg-gradient-to-r from-violet-600 via-fuchsia-500 to-pink-500 rounded-xl hover:from-violet-700 hover:via-fuchsia-600 hover:to-pink-600 transition-all duration-300 shadow-lg hover:shadow-xl"
             >
               Get Started

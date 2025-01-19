@@ -1,23 +1,42 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
+import axios from 'axios';
 import {
   UserCircleIcon,
   EnvelopeIcon,
   KeyIcon,
-  CheckIcon,
-  SparklesIcon,
+  DocumentIcon,
+  GlobeAltIcon,
+  LockClosedIcon,
+  ServerIcon,
 } from '@heroicons/react/24/outline';
 
 const Profile = () => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [profileData, setProfileData] = useState(null);
   const [formData, setFormData] = useState({
     currentPassword: '',
     newPassword: '',
     confirmPassword: '',
   });
+
+  // Fetch profile data
+  const fetchProfileData = async () => {
+    try {
+      const response = await axios.get('/api/users/profile');
+      setProfileData(response.data);
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+      toast.error('Error loading profile data');
+    }
+  };
+
+  useEffect(() => {
+    fetchProfileData();
+  }, []);
 
   const handlePasswordChange = async (e) => {
     e.preventDefault();
@@ -28,7 +47,11 @@ const Profile = () => {
 
     try {
       setLoading(true);
-      // Add password change API call here
+      await axios.post('/api/users/change-password', {
+        currentPassword: formData.currentPassword,
+        newPassword: formData.newPassword,
+      });
+      
       toast.success('Password updated successfully! 🔐');
       setFormData({
         currentPassword: '',
@@ -45,26 +68,26 @@ const Profile = () => {
   const stats = [
     { 
       label: 'Total PDFs', 
-      value: '42',
-      icon: <SparklesIcon className="h-5 w-5 text-white" />,
+      value: profileData?.stats?.totalPDFs || 0,
+      icon: <DocumentIcon className="h-5 w-5 text-white" />,
       gradient: 'from-violet-600 to-fuchsia-600'
     },
     { 
       label: 'Public PDFs', 
-      value: '28',
-      icon: <SparklesIcon className="h-5 w-5 text-white" />,
+      value: profileData?.stats?.publicPDFs || 0,
+      icon: <GlobeAltIcon className="h-5 w-5 text-white" />,
       gradient: 'from-fuchsia-600 to-pink-600'
     },
     { 
       label: 'Private PDFs', 
-      value: '14',
-      icon: <SparklesIcon className="h-5 w-5 text-white" />,
+      value: profileData?.stats?.privatePDFs || 0,
+      icon: <LockClosedIcon className="h-5 w-5 text-white" />,
       gradient: 'from-pink-600 to-rose-600'
     },
     { 
       label: 'Storage Used', 
-      value: '1.2 GB',
-      icon: <SparklesIcon className="h-5 w-5 text-white" />,
+      value: `${profileData?.stats?.totalStorage || 0} MB`,
+      icon: <ServerIcon className="h-5 w-5 text-white" />,
       gradient: 'from-rose-600 to-violet-600'
     },
   ];
@@ -136,7 +159,7 @@ const Profile = () => {
                   onChange={(e) =>
                     setFormData({ ...formData, currentPassword: e.target.value })
                   }
-                  className="appearance-none block w-full px-3 py-2 border border-fuchsia-200 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-fuchsia-500 focus:border-fuchsia-500 bg-gray-50"
+                  className="appearance-none block w-full px-3 py-2 border border-fuchsia-200 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-fuchsia-500 focus:border-fuchsia-500 bg-white/80 backdrop-blur-sm"
                   required
                 />
                 <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
@@ -156,7 +179,7 @@ const Profile = () => {
                   onChange={(e) =>
                     setFormData({ ...formData, newPassword: e.target.value })
                   }
-                  className="appearance-none block w-full px-3 py-2 border border-fuchsia-200 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-fuchsia-500 focus:border-fuchsia-500 bg-gray-50"
+                  className="appearance-none block w-full px-3 py-2 border border-fuchsia-200 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-fuchsia-500 focus:border-fuchsia-500 bg-white/80 backdrop-blur-sm"
                   required
                 />
                 <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
@@ -176,7 +199,7 @@ const Profile = () => {
                   onChange={(e) =>
                     setFormData({ ...formData, confirmPassword: e.target.value })
                   }
-                  className="appearance-none block w-full px-3 py-2 border border-fuchsia-200 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-fuchsia-500 focus:border-fuchsia-500 bg-gray-50"
+                  className="appearance-none block w-full px-3 py-2 border border-fuchsia-200 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-fuchsia-500 focus:border-fuchsia-500 bg-white/80 backdrop-blur-sm"
                   required
                 />
                 <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
@@ -200,10 +223,7 @@ const Profile = () => {
                   Updating...
                 </div>
               ) : (
-                <>
-                  <CheckIcon className="h-5 w-5 mr-2" />
-                  Update Password
-                </>
+                'Change Password'
               )}
             </motion.button>
           </form>

@@ -1,6 +1,7 @@
 const PDF = require('../models/pdf.model');
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs').promises;
 
 // Configure multer for file upload
 const storage = multer.diskStorage({
@@ -22,186 +23,223 @@ const upload = multer({
       cb(new Error('Only PDF files are allowed'));
     }
   }
-}).single('pdf');
+}).single('pdf'); 
 
 // Upload PDF
 exports.uploadPDF = async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ message: 'Please upload a PDF file' });
-    }
-
-    const { title, description, tags, isPublic } = req.body;
-    
-    const pdf = new PDF({
-      title,
-      description,
-      filePath: req.file.path,
-      fileSize: req.file.size,
-      uploadedBy: req.user._id,
-      tags: tags ? tags.split(',').map(tag => tag.trim()) : [],
-      isPublic: isPublic === 'true'
-    });
-
-    await pdf.save();
-    res.status(201).json({
-      message: 'PDF uploaded successfully',
-      pdf: {
-        _id: pdf._id,
-        title: pdf.title,
-        description: pdf.description,
-        fileSize: pdf.fileSize,
-        tags: pdf.tags,
-        isPublic: pdf.isPublic,
-        createdAt: pdf.createdAt
-      }
-    });
-  } catch (error) {
-    console.error('Error uploading PDF:', error);
-    res.status(500).json({ message: 'Error uploading PDF', error: error.message });
+  if (!req.file) {
+    return res.status(400).json({ message: 'No file uploaded' });
   }
+
+  const pdf = new PDF({
+    title: req.body.title || req.file.originalname,
+    description: req.body.description,
+    filePath: req.file.path,
+    fileSize: req.file.size,
+    uploadedBy: req.user._id,
+    tags: req.body.tags ? req.body.tags.split(',').map(tag => tag.trim()) : []
+  });
+
+  await pdf.save();
+  res.status(201).json(pdf);
 };
 
-// Get all PDFs (with enhanced search, sort, and filter)
+// Get all PDFs
 exports.getPDFs = async (req, res) => {
   try {
-    const { search = '', sort = 'newest', filter = 'all', searchBy = 'all' } = req.query;
+    console.log('Getting PDFs for user:', req.user._id);
+    console.log('Query params:', req.query);
+
+    const { search = '', sort = 'newest', filter = 'all', searchBy = 'all', dateFilter = 'all' } = req.query;
 
     // Build query
     let query = {};
 
-    // Enhanced search based on searchBy parameter
-    if (search) {
-      const searchTerms = search.split(',').map(term => term.trim()).filter(Boolean);
-      
-      if (searchBy === 'tags') {
-        // Search only in tags array
-        query.tags = {
-          $in: searchTerms.map(term => new RegExp(term, 'i'))
-        };
-      } else if (searchBy === 'name') {
-        // Search only in title
-        query.title = { $regex: search, $options: 'i' };
-      } else {
-        // Search in all fields (default)
-        query.$or = [
-          { title: { $regex: search, $options: 'i' } },
-          { description: { $regex: search, $options: 'i' } },
-          { tags: { $in: searchTerms.map(term => new RegExp(term, 'i')) } }
-        ];
-      }
-    }
-
-    // Filter public/private
+    // Handle public/private filter
     if (filter === 'public') {
-      query.isPublic = true;
-    } else if (filter === 'private') {
-      query.isPublic = false;
-      query.uploadedBy = req.user._id;
-    } else {
-      // For 'all', show public PDFs and user's private PDFs
-      const accessQuery = {
+      query = { 
         $or: [
-          { isPublic: true },
-          { uploadedBy: req.user._id }
+          { uploadedBy: req.user._id },
+          { isPublic: true }
         ]
       };
-      query = query.$or 
-        ? { $and: [query, accessQuery] }
-        : { ...query, ...accessQuery };
+    } else if (filter === 'private') {
+      query = {
+        uploadedBy: req.user._id,
+        isPublic: false
+      };
+    } else {
+      // Default to showing user's own PDFs
+      query = { uploadedBy: req.user._id };
     }
 
-    // Build sort options
-    let sortOptions = {};
-    switch (sort) {
-      case 'oldest':
-        sortOptions = { createdAt: 1 };
-        break;
-      case 'name':
-        sortOptions = { title: 1 };
-        break;
-      default: // 'newest'
-        sortOptions = { createdAt: -1 };
+    // Add search conditions
+    if (search) {
+      const searchQuery = searchBy === 'title' ? 
+        { title: { $regex: search, $options: 'i' } } :
+        searchBy === 'description' ? 
+          { description: { $regex: search, $options: 'i' } } :
+        searchBy === 'tags' ? 
+          { tags: { $in: [new RegExp(search, 'i')] } } :
+          {
+            $or: [
+              { title: { $regex: search, $options: 'i' } },
+              { description: { $regex: search, $options: 'i' } },
+              { tags: { $in: [new RegExp(search, 'i')] } }
+            ]
+          };
+      
+      query = {
+        $and: [query, searchQuery]
+      };
     }
+
+    // Add date filter
+    if (dateFilter !== 'all') {
+      const now = new Date();
+      let dateQuery = {};
+      
+      if (dateFilter === 'today') {
+        dateQuery = {
+          $gte: new Date(now.setHours(0, 0, 0, 0)),
+          $lt: new Date(now.setHours(23, 59, 59, 999))
+        };
+      } else if (dateFilter === 'week') {
+        const weekAgo = new Date(now.setDate(now.getDate() - 7));
+        dateQuery = { $gte: weekAgo };
+      } else if (dateFilter === 'month') {
+        const monthAgo = new Date(now.setMonth(now.getMonth() - 1));
+        dateQuery = { $gte: monthAgo };
+      }
+      
+      query = {
+        $and: [query, { createdAt: dateQuery }]
+      };
+    }
+
+    // Build sort
+    let sortQuery = {};
+    if (sort === 'newest') {
+      sortQuery = { createdAt: -1 };
+    } else if (sort === 'oldest') {
+      sortQuery = { createdAt: 1 };
+    } else if (sort === 'name') {
+      sortQuery = { title: 1 };
+    } else if (sort === 'size') {
+      sortQuery = { fileSize: -1 };
+    }
+
+    console.log('Final query:', JSON.stringify(query, null, 2));
+    console.log('Sort query:', sortQuery);
 
     const pdfs = await PDF.find(query)
-      .sort(sortOptions)
+      .sort(sortQuery)
       .populate('uploadedBy', 'username')
+      .lean()
       .exec();
+      
+    console.log('Found PDFs:', pdfs.length);
 
-    res.json({
-      pdfs: pdfs.map(pdf => ({
-        _id: pdf._id,
-        title: pdf.title,
-        description: pdf.description,
-        fileSize: pdf.fileSize,
-        tags: pdf.tags,
-        isPublic: pdf.isPublic,
-        createdAt: pdf.createdAt,
-        uploadedBy: pdf.uploadedBy.username
-      }))
-    });
+    // Transform the response to match frontend expectations
+    const transformedPdfs = pdfs.map(pdf => ({
+      ...pdf,
+      uploadedBy: pdf.uploadedBy?.username || 'Unknown',
+      id: pdf._id.toString()
+    }));
+
+    res.json({ pdfs: transformedPdfs });
   } catch (error) {
-    console.error('Error fetching PDFs:', error);
+    console.error('Error in getPDFs:', error);
     res.status(500).json({ message: 'Error fetching PDFs', error: error.message });
   }
 };
 
 // Get single PDF
 exports.getPDF = async (req, res) => {
-  try {
-    const pdf = await PDF.findById(req.params.id).populate('uploadedBy', 'username');
-    if (!pdf) {
-      return res.status(404).json({ message: 'PDF not found' });
-    }
-
-    if (!pdf.isPublic && pdf.uploadedBy._id.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Access denied' });
-    }
-
-    res.json(pdf);
-  } catch (error) {
-    res.status(500).json({ message: 'Error fetching PDF', error: error.message });
+  const pdf = await PDF.findOne({ _id: req.params.id, uploadedBy: req.user._id });
+  if (!pdf) {
+    return res.status(404).json({ message: 'PDF not found' });
   }
+  res.json(pdf);
 };
 
 // Download PDF
-const downloadPdf = async (req, res) => {
+exports.downloadPdf = async (req, res) => {
+  const pdf = await PDF.findOne({ _id: req.params.id, uploadedBy: req.user._id });
+  if (!pdf) {
+    return res.status(404).json({ message: 'PDF not found' });
+  } 
+
+  const filePath = path.resolve(__dirname, '..', pdf.filePath);
   try {
-    const pdf = await PDF.findById(req.params.id);
-    if (!pdf) {
-      return res.status(404).json({ message: 'PDF not found' });
-    }
-
-    // Check if user has access to the PDF
-    if (!pdf.isPublic && pdf.uploadedBy.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Access denied' });
-    }
-
-    // Send the file
-    res.download(pdf.filePath, pdf.title + '.pdf');
+    await fs.access(filePath);
+    res.download(filePath);
   } catch (error) {
-    console.error('Error downloading PDF:', error);
-    res.status(500).json({ message: 'Error downloading PDF' });
+    res.status(404).json({ message: 'File not found on server' });
   }
+};
+
+// Update PDF details
+exports.updatePDF = async (req, res) => {
+  const pdf = await PDF.findOne({ _id: req.params.id, uploadedBy: req.user._id });
+  if (!pdf) {
+    return res.status(404).json({ message: 'PDF not found' });
+  }
+
+  Object.assign(pdf, req.body);
+  await pdf.save();
+  res.json(pdf);
 };
 
 // Delete PDF
 exports.deletePDF = async (req, res) => {
   try {
-    const pdf = await PDF.findById(req.params.id);
+    console.log('Deleting PDF with ID:', req.params.id);
+    console.log('User ID:', req.user._id);
+
+    const pdf = await PDF.findOne({ _id: req.params.id, uploadedBy: req.user._id });
+    
     if (!pdf) {
+      console.log('PDF not found or user does not have permission');
       return res.status(404).json({ message: 'PDF not found' });
     }
 
-    if (pdf.uploadedBy.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Access denied' });
+    // Delete from database first
+    console.log('Deleting from database...');
+    const deleteResult = await PDF.deleteOne({ _id: pdf._id });
+    
+    if (deleteResult.deletedCount === 0) {
+      console.log('PDF not found in database');
+      return res.status(404).json({ message: 'PDF not found in database' });
     }
 
-    await pdf.remove();
+    // Then try to delete the file
+    if (pdf.filePath) {
+      try {
+        console.log('Original filePath:', pdf.filePath);
+        const filePath = path.resolve(__dirname, '..', pdf.filePath);
+        console.log('Resolved filePath:', filePath);
+        
+        const fileExists = await fs.access(filePath).then(() => true).catch(() => false);
+        console.log('File exists:', fileExists);
+        
+        if (fileExists) {
+          await fs.unlink(filePath);
+          console.log('File deleted successfully');
+        } else {
+          console.log('File does not exist on disk');
+        }
+      } catch (error) {
+        console.error('Error deleting file:', error);
+        // Don't throw error if file deletion fails
+      }
+    }
+
+    console.log('PDF deletion completed successfully');
     res.json({ message: 'PDF deleted successfully' });
   } catch (error) {
-    res.status(500).json({ message: 'Error deleting PDF', error: error.message });
+    console.error('Error in deletePDF:', error);
+    throw error; // Let the asyncHandler middleware handle the error
   }
 };
 
@@ -210,5 +248,6 @@ module.exports = {
   getPDFs: exports.getPDFs,
   getPDF: exports.getPDF,
   deletePDF: exports.deletePDF,
-  downloadPdf,
+  downloadPdf: exports.downloadPdf,
+  updatePDF: exports.updatePDF,
 };

@@ -16,7 +16,7 @@ router.get('/', auth, asyncHandler(pdfController.getPDFs));
 router.get('/:id', auth, asyncHandler(pdfController.getPDF));
 
 // Download PDF
-router.get('/:id/download', auth, asyncHandler(pdfController.downloadPdf));
+router.get('/:id/download', auth, asyncHandler(pdfController.downloadPDF));
 
 // Upload PDF
 router.post('/upload', auth, upload.single('file'), asyncHandler(pdfController.uploadPDF));

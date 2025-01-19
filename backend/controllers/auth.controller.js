@@ -1,12 +1,12 @@
 const User = require('../models/user.model');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
 
 // Register new user
 exports.register = async (req, res) => {
   try {
     const { username, email, password } = req.body;
 
-    
     // Check if user already exists
     const existingUser = await User.findOne({ $or: [{ email }, { username }] });
     if (existingUser) {
@@ -70,8 +70,70 @@ exports.login = async (req, res) => {
 exports.getProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('-password');
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
     res.json(user);
   } catch (error) {
+    console.error('Error in getProfile:', error);
     res.status(500).json({ message: 'Error fetching profile', error: error.message });
+  }
+};  
+
+// Get user stats
+exports.getStats = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const PDF = require('../models/pdf.model'); // Import PDF model
+
+    // Get PDF counts
+    const [totalPDFs, publicPDFs] = await Promise.all([
+      PDF.countDocuments({ uploadedBy: userId }),
+      PDF.countDocuments({ uploadedBy: userId, isPublic: true })
+    ]);
+
+    const privatePDFs = totalPDFs - publicPDFs;
+
+    res.json({
+      totalPDFs,
+      publicPDFs,
+      privatePDFs
+    });
+  } catch (error) {
+    console.error('Error in getStats:', error);
+    res.status(500).json({ message: 'Error getting stats', error: error.message });
+  }
+};
+
+// Change password
+exports.changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user._id;
+
+    // Find user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Verify current password
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Current password is incorrect' });
+    }
+
+    // Hash new password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    // Update password
+    user.password = hashedPassword;
+    await user.save();
+
+    res.json({ message: 'Password updated successfully' });
+  } catch (error) {
+    console.error('Error in changePassword:', error);
+    res.status(500).json({ message: 'Error changing password', error: error.message });
   }
 };

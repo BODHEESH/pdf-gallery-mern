@@ -3,27 +3,32 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
 
-// Configure multer for file upload
+// Configure multer for PDF uploads
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
+  destination: function (req, file, cb) {
     cb(null, 'uploads/');
   },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + '-' + file.originalname);
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'pdf-' + uniqueSuffix + path.extname(file.originalname));
   }
 });
 
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/pdf') {
-      cb(null, true);
-    } else {
-      cb(new Error('Only PDF files are allowed'));
-    }
+// File filter to only allow PDFs
+const fileFilter = (req, file, cb) => {
+  if (file.mimetype === 'application/pdf') {
+    cb(null, true);
+  } else {
+    cb(new Error('Only PDF files are allowed!'), false);
   }
-}).single('pdf'); 
+};
+
+// Configure multer
+const upload = multer({
+  storage: storage,
+  fileFilter: fileFilter,
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+}).single('pdf');
 
 // Upload PDF
 exports.uploadPDF = async (req, res) => {
@@ -164,18 +169,40 @@ exports.getPDF = async (req, res) => {
 };
 
 // Download PDF
-exports.downloadPdf = async (req, res) => {
-  const pdf = await PDF.findOne({ _id: req.params.id, uploadedBy: req.user._id });
-  if (!pdf) {
-    return res.status(404).json({ message: 'PDF not found' });
-  } 
-
-  const filePath = path.resolve(__dirname, '..', pdf.filePath);
+exports.downloadPDF = async (req, res) => {
   try {
-    await fs.access(filePath);
-    res.download(filePath);
+    const pdf = await PDF.findOne({ _id: req.params.id });
+    if (!pdf) {
+      return res.status(404).json({ message: 'PDF not found' });
+    }
+
+    // Construct absolute file path
+    const filePath = path.join(process.cwd(), pdf.filePath);
+    console.log('Attempting to download file:', filePath);
+    
+    try {
+      // Check if file exists
+      await fs.access(filePath);
+      
+      // Set headers for PDF download
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(pdf.title)}.pdf"`);
+      
+      // Stream the file
+      const fileStream = require('fs').createReadStream(filePath);
+      fileStream.on('error', (error) => {
+        console.error('Stream error:', error);
+        res.status(500).json({ message: 'Error streaming file' });
+      });
+      
+      fileStream.pipe(res);
+    } catch (error) {
+      console.error('File access error:', error);
+      return res.status(404).json({ message: 'File not found on server' });
+    }
   } catch (error) {
-    res.status(404).json({ message: 'File not found on server' });
+    console.error('Download error:', error);
+    return res.status(500).json({ message: 'Error downloading file' });
   }
 };
 
@@ -246,8 +273,7 @@ exports.deletePDF = async (req, res) => {
 module.exports = {
   uploadPDF: exports.uploadPDF,
   getPDFs: exports.getPDFs,
-  getPDF: exports.getPDF,
-  deletePDF: exports.deletePDF,
-  downloadPdf: exports.downloadPdf,
+  downloadPDF: exports.downloadPDF,
   updatePDF: exports.updatePDF,
+  deletePDF: exports.deletePDF,
 };

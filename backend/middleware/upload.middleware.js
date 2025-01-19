@@ -7,7 +7,6 @@ const storage = multer.diskStorage({
     cb(null, 'uploads/');
   },
   filename: function (req, file, cb) {
-    // Create unique filename with timestamp
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, 'pdf-' + uniqueSuffix + path.extname(file.originalname));
   }
@@ -26,9 +25,7 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
-  limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB limit
-  }
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
 });
 
 module.exports = upload;
